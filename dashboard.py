@@ -705,9 +705,10 @@ def pi_stats() -> dict:
 # バックグラウンド更新
 # ─────────────────────────────────────────────
 class Dashboard:
-    def __init__(self, cfg: dict, demo: bool = False):
+    def __init__(self, cfg: dict, demo: bool = False, compact: bool = False):
         self.cfg = cfg
         self.demo = demo
+        self.compact = compact  # --3ds: 小さい画面向け（カレンダー・ニュース・日の入りなどを省略）
         self.weather = WeatherState()
         self.spotify = SpotifyState()
         self.news = NewsState()
@@ -776,7 +777,7 @@ class Dashboard:
 
     def news_loop(self):
         n = self.cfg["news"]
-        if not n.get("enabled", True):
+        if not n.get("enabled", True) or self.compact:
             return
         while not self.stop.is_set():
             if self.demo:
@@ -807,12 +808,16 @@ class Dashboard:
             threading.Thread(target=fn, daemon=True).start()
 
     # --- 描画 ---
-    def render(self, width: int | None = None) -> Layout:
+    def render(self, width: int | None = None, height: int | None = None) -> Layout:
         if width:
             self.width = width
+        if height:
+            self.height = height
         accent = self.cfg["display"]["accent"]
         with self.lock:
             weather, spotify, news, stats = self.weather, self.spotify, self.news, dict(self.stats)
+        if self.compact:
+            return self.render_compact(weather, spotify, stats, accent)
 
         news_cfg = self.cfg["news"]
         rows = [
@@ -876,7 +881,8 @@ class Dashboard:
 
     def render_clock(self, accent: str) -> Panel:
         now = dt.datetime.now()
-        if self.cfg["display"].get("show_seconds", True):
+        # 幅が足りないとき（40文字未満）は秒を省いて 時:分 だけにする
+        if self.cfg["display"].get("show_seconds", True) and getattr(self, "width", 80) >= 40:
             # 時:分 と 秒 で色を分けて、秒を少し控えめにする
             hm = big_text(now.strftime("%H:%M:")).split("\n")
             ss = big_text(now.strftime("%S")).split("\n")
@@ -893,6 +899,72 @@ class Dashboard:
         date = Text(f"{now:%Y年%m月%d日}（{weekday}）", style="bold")
         return Panel(Align.center(Group(Align.center(clock), Align.center(date)), vertical="middle"),
                      border_style=accent)
+
+    # ─── 3DS など小さい画面用 ───
+    def render_compact(self, weather: WeatherState, spotify: SpotifyState, stats: dict, accent: str) -> Layout:
+        height = getattr(self, "height", 30)
+        rows = [
+            Layout(self.render_clock(accent), name="clock", size=9),
+            Layout(self.render_weather_compact(weather, accent), name="weather", size=5),
+            Layout(self.render_spotify_compact(spotify), name="spotify", size=6),
+        ]
+        used = 9 + 5 + 6 + 1
+        if self.pet and height - used >= 5:
+            rows.append(Layout(self.pet.render(max(20, self.width - 1), music=spotify.status == "playing"),
+                               name="pet", size=5))
+        rows.append(Layout(self.render_footer_compact(stats), name="footer", size=1))
+        layout = Layout()
+        layout.split_column(*rows)
+        return layout
+
+    def render_weather_compact(self, w: WeatherState, accent: str) -> Panel:
+        city = self.cfg["weather"]["city"]
+        if not w.ok:
+            return Panel(Text(w.error, style="dim"), title=city, border_style="blue")
+        _, desc = WMO_CODES.get(w.code, ("", f"code {w.code}"))
+        line1 = Text.assemble((f"{desc} {w.temp:.1f}℃", f"bold {accent}"), (f"  体感{w.feels:.0f}℃", "dim"))
+        line2 = Text.assemble((f"{w.t_max:.0f}℃", "red"), "/", (f"{w.t_min:.0f}℃", "blue"),
+                              f"  降水{w.rain_prob}%  湿度{w.humidity}%")
+        line3 = Text("  ".join(f"{h} {temp:.0f}℃ {p}%" for h, temp, p in w.hourly), style="dim",
+                     overflow="ellipsis", no_wrap=True)
+        return Panel(Group(line1, line2, line3), title=city, border_style="blue")
+
+    def render_spotify_compact(self, s: SpotifyState) -> Panel:
+        green = "#1DB954"
+        if s.status not in ("playing", "paused"):
+            return Panel(Text(s.message or "接続中…", style="dim", overflow="ellipsis"),
+                         title="Spotify", border_style=green)
+        prog = s.live_progress_ms()
+
+        def fmt(ms: int) -> str:
+            sec = ms // 1000
+            return f"{sec // 60}:{sec % 60:02d}"
+
+        mark = "▶" if s.status == "playing" else "||"
+        bar = ProgressBar(total=max(s.duration_ms, 1), completed=prog, width=None,
+                          complete_style=green, finished_style=green)
+        times = Table.grid(expand=True, padding=(0, 1))
+        times.add_column(width=4, justify="right")
+        times.add_column(ratio=1)
+        times.add_column(width=4)
+        times.add_row(Text(fmt(prog), style="dim"), bar, Text(fmt(s.duration_ms), style="dim"))
+        body = Group(
+            Text.assemble((mark + " ", f"bold {green}"), (s.title, "bold white"), overflow="ellipsis", no_wrap=True),
+            Text(s.artists, style=green, overflow="ellipsis", no_wrap=True),
+            Text(""),
+            times,
+        )
+        return Panel(body, title="Spotify", border_style=green)
+
+    def render_footer_compact(self, st: dict) -> Text:
+        parts = [(st.get("host", "?"), "bold")]
+        if st.get("cpu_temp") is not None:
+            c = st["cpu_temp"]
+            parts.append((f" CPU{c:.0f}℃", "red" if c >= 70 else "yellow" if c >= 60 else "green"))
+        if st.get("mem") is not None:
+            parts.append((f" MEM{st['mem']:.0f}%", ""))
+        parts.append(("  Ctrl+C:終了", "dim"))
+        return Text.assemble(*parts, overflow="ellipsis", no_wrap=True)
 
     def render_calendar(self, accent: str) -> Panel:
         import calendar
@@ -1097,6 +1169,8 @@ def main():
     ap.add_argument("--auth", action="store_true", help="Spotify の初回認証を行う")
     ap.add_argument("--demo", action="store_true", help="ダミーデータで表示だけ確認する")
     ap.add_argument("--once", action="store_true", help="1回だけ描画して終了（動作確認用）")
+    ap.add_argument("--3ds", dest="compact", action="store_true",
+                    help="3DS など小さい画面向けの簡易表示（時計・天気・Spotify・ペット）")
     args = ap.parse_args()
 
     cfg = load_config()
@@ -1105,20 +1179,22 @@ def main():
         return
 
     console = Console()
-    dash = Dashboard(cfg, demo=args.demo)
+    dash = Dashboard(cfg, demo=args.demo, compact=args.compact)
     dash.start()
 
     if args.once:
         time.sleep(1.5)
-        console.print(dash.render(console.width), height=console.height)
+        console.print(dash.render(console.width, console.height), height=console.height)
         dash.stop.set()
         return
 
     fps = cfg["display"]["refresh_per_sec"]
+    if args.compact:
+        fps = min(fps, 2)  # 3DS の Wi-Fi・描画は遅いので更新回数を抑える
     try:
-        with Live(dash.render(console.width), console=console, screen=True, refresh_per_second=fps) as live:
+        with Live(dash.render(console.width, console.height), console=console, screen=True, refresh_per_second=fps) as live:
             while True:
-                live.update(dash.render(console.width))
+                live.update(dash.render(console.width, console.height))
                 time.sleep(1 / fps)
     except KeyboardInterrupt:
         pass

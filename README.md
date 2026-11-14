@@ -106,6 +106,7 @@ ssh -t pi@raspberrypi.local tmux attach -t dash
 | `./run.sh --demo` | ネット不要のダミーデータ表示 |
 | `./run.sh --auth` | Spotify 認証 |
 | `./run.sh --once` | 1回だけ描画して終了（デバッグ用） |
+| `./run.sh --3ds` | 3DS など小さい画面向け（時計・天気・Spotify・ペットだけ。更新は秒2回） |
 
 ## トラブルシュート
 
