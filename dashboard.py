@@ -903,21 +903,31 @@ class Dashboard:
     # ─── 3DS など小さい画面用 ───
     def render_compact(self, weather: WeatherState, spotify: SpotifyState, stats: dict, accent: str) -> Layout:
         height = getattr(self, "height", 30)
+        # 3DS の上画面（約20行）でもペットが入るよう、低い画面では詰めて表示する
+        tight = height < 26
         rows = [
-            Layout(self.render_clock(accent), name="clock", size=9),
-            Layout(self.render_weather_compact(weather, accent), name="weather", size=5),
-            Layout(self.render_spotify_compact(spotify), name="spotify", size=6),
+            Layout(self.render_clock_tight(accent) if tight else self.render_clock(accent),
+                   name="clock", size=6 if tight else 9),
+            Layout(self.render_weather_compact(weather, accent, tight), name="weather", size=4 if tight else 5),
+            Layout(self.render_spotify_compact(spotify, tight), name="spotify", size=5 if tight else 6),
         ]
-        used = 9 + 5 + 6 + 1
+        used = sum(r.size for r in rows)
         if self.pet and height - used >= 5:
             rows.append(Layout(self.pet.render(max(20, self.width - 1), music=spotify.status == "playing"),
                                name="pet", size=5))
-        rows.append(Layout(self.render_footer_compact(stats), name="footer", size=1))
+            used += 5
+        if height - used >= 1:
+            rows.append(Layout(self.render_footer_compact(stats), name="footer", size=1))
         layout = Layout()
         layout.split_column(*rows)
         return layout
 
-    def render_weather_compact(self, w: WeatherState, accent: str) -> Panel:
+    def render_clock_tight(self, accent: str):
+        """枠なし・余白なしの時計（6行）"""
+        panel = self.render_clock(accent)
+        return panel.renderable  # Panel の中身（中央寄せの時計＋日付）だけ使う
+
+    def render_weather_compact(self, w: WeatherState, accent: str, tight: bool = False) -> Panel:
         city = self.cfg["weather"]["city"]
         if not w.ok:
             return Panel(Text(w.error, style="dim"), title=city, border_style="blue")
@@ -927,9 +937,14 @@ class Dashboard:
                               f"  降水{w.rain_prob}%  湿度{w.humidity}%")
         line3 = Text("  ".join(f"{h} {temp:.0f}℃ {p}%" for h, temp, p in w.hourly), style="dim",
                      overflow="ellipsis", no_wrap=True)
+        if tight:  # 2行に圧縮
+            line1 = Text.assemble((f"{desc} {w.temp:.1f}℃", f"bold {accent}"),
+                                  (f" {w.t_max:.0f}", "red"), "/", (f"{w.t_min:.0f}℃", "blue"),
+                                  f" 降水{w.rain_prob}%", overflow="ellipsis", no_wrap=True)
+            return Panel(Group(line1, line3), title=city, border_style="blue")
         return Panel(Group(line1, line2, line3), title=city, border_style="blue")
 
-    def render_spotify_compact(self, s: SpotifyState) -> Panel:
+    def render_spotify_compact(self, s: SpotifyState, tight: bool = False) -> Panel:
         green = "#1DB954"
         if s.status not in ("playing", "paused"):
             return Panel(Text(s.message or "接続中…", style="dim", overflow="ellipsis"),
@@ -951,7 +966,7 @@ class Dashboard:
         body = Group(
             Text.assemble((mark + " ", f"bold {green}"), (s.title, "bold white"), overflow="ellipsis", no_wrap=True),
             Text(s.artists, style=green, overflow="ellipsis", no_wrap=True),
-            Text(""),
+            *([] if tight else [Text("")]),
             times,
         )
         return Panel(body, title="Spotify", border_style=green)
