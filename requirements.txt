@@ -1,0 +1,4 @@
+rich>=13.7
+requests>=2.31
+spotipy>=2.24
+jpholiday>=0.1.10

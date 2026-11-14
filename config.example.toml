@@ -1,0 +1,36 @@
+# config.toml にコピーして使う:  cp config.example.toml config.toml
+
+[weather]
+city = "東京"          # 表示名（自由）
+latitude = 35.6812     # Googleマップで地点を右クリックすると緯度経度が出る
+longitude = 139.7671
+interval_sec = 600     # 天気の更新間隔（秒）
+
+[spotify]
+enabled = true
+client_id = ""         # https://developer.spotify.com/dashboard で作ったアプリの値
+client_secret = ""
+redirect_uri = "http://127.0.0.1:8888/callback"   # ダッシュボードに登録したものと完全一致させる
+interval_sec = 5       # 再生状況の取得間隔（秒）
+
+[news]
+enabled = true
+interval_sec = 900     # 取得間隔（秒）
+rotate_sec = 10        # 見出しを切り替える間隔（秒）
+lines = 5              # 一度に表示する件数（画面が狭いなら 3 くらいに）
+
+# RSS / Atom のフィードを好きなだけ追加できる（新しい順にまとめて表示）
+[[news.feeds]]
+name = "Google ニュース"
+url = "https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja"
+
+# 例: テクノロジーだけ見たいとき（Google ニュースのトピック）
+# [[news.feeds]]
+# name = "ITmedia"
+# url = "https://rss.itmedia.co.jp/rss/2.0/itmedia_all.xml"
+
+[display]
+refresh_per_sec = 4
+accent = "cyan"        # 時計の色 (red, green, yellow, magenta, "#ff8800" など)
+show_seconds = true    # 時計に秒を大きく表示する（false で 時:分 だけ）
+pet = "both"           # 画面下のペット: "both"（犬猫いっしょ） / "cat" / "dog" / "off"
