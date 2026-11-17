@@ -150,8 +150,18 @@ def fetch_weather(lat: float, lon: float) -> WeatherState:
         "forecast_days": 2,
         "wind_speed_unit": "ms",
     }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
+    # 接続5秒・応答30秒まで待ち、タイムアウトしたら少し空けて最大3回試す
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, timeout=(5, 30))
+            r.raise_for_status()
+            break
+        except (requests.Timeout, requests.ConnectionError) as e:
+            last_err = e
+            time.sleep(3 * (attempt + 1))
+    else:
+        raise last_err  # type: ignore[misc]
     d = r.json()
     cur, daily, hourly = d["current"], d["daily"], d["hourly"]
 
